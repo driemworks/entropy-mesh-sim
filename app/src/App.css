@@ -1,0 +1,30 @@
+.App {
+  display: grid;
+  text-align: center;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.title {
+  font-size: 40px;
+}
+
+.body {
+
+}
+
+.beacons-container {
+  margin: 0 auto;
+}
+
+.beacon-container {
+  margin: 0 auto;
+  display: grid;
+  border: 1px solid black;
+  max-width: 200px;
+}
+
+.beacon-search {
+  display: grid;
+  max-width: 200px;
+  margin: 0 auto;
+}
