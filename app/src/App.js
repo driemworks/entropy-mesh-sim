@@ -1,12 +1,18 @@
-import logo from './logo.svg';
-import './App.css';
-import { useEffect, useState } from 'react';
-
-import { put, get, del } from '@web3-storage/pail'
-import { ShardBlock } from '@web3-storage/pail/shard'
-import { MemoryBlockstore } from '@web3-storage/pail/block'
-
+import React from 'react';
+import { useContext, useEffect, useState, useRef } from 'react';
+import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
+import 'react-tabs/style/react-tabs.css';
+import EventEmitter from 'events';
+import { put, get, del } from '@web3-storage/pail';
+import { ShardBlock } from '@web3-storage/pail/shard';
+import { MemoryBlockstore } from '@web3-storage/pail/block';
+import { EntropyMeshContext } from './mesh.context';
 import init, { generate_keys, extract_signature } from '@ideallabs/etf-sdk';
+import MeshQueryContainer from './components/mesh-query.container';
+import TLock from './components/tlock';
+// import BeaconContainer from './components/beacon-container';
+import { buildUri } from './util';
+import './App.css';
 
 class Pulse {
   constructor(signature, id, index) {
@@ -25,7 +31,6 @@ class BeaconSim {
 
   nextPulse() {
     let nextPulseIndex = this.prevPulseIndex + 1;
-    console.log('next Pulse index ' + nextPulseIndex)
     let t = new TextEncoder();
     let pulseId = t.encode('0x' + this.chainId + nextPulseIndex);
     let pulseRandomness = extract_signature(pulseId, this.keypair.sk);
@@ -36,202 +41,131 @@ class BeaconSim {
 }
 
 function App() {
-
   const [beacons, setBeacons] = useState([]);
   const [memoryBlockstore, setMemoryBlockstore] = useState(null);
   const [rootShard, setRootShard] = useState(null);
 
-  const [searchChainId, setSearchChainId] = useState('');
-  const [searchPulseIndex, setSearchPulseIndex] = useState(0);
+  const beaconListener = useRef(new EventEmitter()).current;
 
-
-  const [run, setRun] = useState(false);
-
-  const INTERVAL = 3000;
+  const INTERVAL = 5000;
 
   const randomNumberInRange = (min, max) => {
-    return Math.floor(Math.random()
-        * (max - min + 1)) + min;
+    return Math.floor(Math.random() * (max - min + 1)) + min;
   };
 
-  // const toHexString = (byteArray) => {
-  //   return Array.from(byteArray, function(byte) {
-  //     return ('0' + (byte & 0xFF).toString(16)).slice(-2);
-  //   }).join('')
-  // }
-
-
   useEffect(() => {
-
-    console.log("component rendered or updated");
-
     const setup = async () => {
-      // Initialize a new bucket
       const blocks = new MemoryBlockstore();
-      const init = await ShardBlock.create(); // empty root shard
-      await blocks.put(init.cid, init.bytes);
-
-      // console.log('initial blocks ' + JSON.stringify(blocks));
-      // console.log('initial cid ' + init.cid);
+      const initShard = await ShardBlock.create(); // empty root shard
+      await blocks.put(initShard.cid, initShard.bytes);
 
       let newBeacons = [];
-      let beacon1 = buildBeacon("DOT");
-      let beacon2 = buildBeacon("ETH");
+      let beacon1 = buildBeacon('DOT');
+      let beacon2 = buildBeacon('ETH');
+
       newBeacons.push(beacon1);
       newBeacons.push(beacon2);
 
+      return { newBeacons, blocks, shard: initShard.cid };
+    };
+
+    const setupAndRun = async () => {
+      await init();
+      const { newBeacons, blocks, shard } = await setup();
       setBeacons(newBeacons);
       setMemoryBlockstore(blocks);
-      setRootShard(init.cid);
+      setRootShard(shard);
 
-      // const interval = setInterval(async () => {
-      //   let b = randomNumberInRange(0, 2);
-      //   if (beacons) {
-      //     let beacon = beacons[b];
-      //     if (beacon) {
-      //       let pulse = beacon.nextPulse();
-      //       let uri = '/beacon/2.0/chain/' + beacon.chainId + '/pulse/' + pulse.index;
-      //       console.log(JSON.stringify(beacon))
-      //       // Add a key and value to the bucket
-      //       const { root, additions, removals } 
-      //         = await put(blocks, init.cid, uri, pulse)
-      //       console.log(`new root: ${root}`)
-      //       // console.log(
-      //       //   'latest pulse: chainId ' 
-      //       //   + beacon.chainId 
-      //       //   + ', randomness: ' 
-      //       //   + JSON.stringify(pulse)
-      //       // );
-      //     }
-      //   }
-      // }, INTERVAL);
-  
-      // return () => clearInterval(interval);
-    }
+      const intervalId = setInterval(() => randBeacon(newBeacons), INTERVAL);
+      return () => clearInterval(intervalId);
+    };
 
-    init().then(_ => {
-      setup()
-    });
+    setupAndRun();
+  }, []);
 
-  }, [])
+  useEffect(() => {
+    const handlePulse = async ({ uri, pulse }) => {
+      if (!memoryBlockstore || !rootShard) return;
+      try {
+        const { root, blockstore } = await updateBlockstore(memoryBlockstore, rootShard, uri, pulse);
 
-  const runBeacons = () => {
-    const interval = setInterval(async () => {
-      let b = randomNumberInRange(0, 2);
-      if (beacons) {
-        let beacon = beacons[b];
-        if (beacon) {
-          let pulse = beacon.nextPulse();
-          let uri = '/beacon/2.0/chain/' + beacon.chainId + '/pulse/' + pulse.index;
-          
-          // Logging the initial blockstore state
-          console.log('Initial blockstore: ', memoryBlockstore);
-  
-          // Use the functional update form to ensure the latest state is used
-          setMemoryBlockstore(prevBlockstore => {
-            // Clone the current blockstore to perform operations on it
-            // let blockstore = { ...prevBlockstore };
-            let blockstore = memoryBlockstore;
-  
-            const updateBlockstore = async () => {
-              const { root, additions, removals } = await put(blockstore, rootShard, uri, pulse);
-              console.log('additions: ', additions);
-              console.log(`new root: ${root}`);
-  
-              // Process the additions
-              for (const block of additions) {
-                await blockstore.put(block.cid, block.bytes);
-              }
-  
-              // Uncomment this if you need to handle removals
-              // Process the removals
-              // for (const block of removals) {
-              //   await blockstore.delete(block.cid);
-              // }
-  
-              // console.log('want ' + JSON.stringify(blockstore));
-              // // Return the updated blockstore
-              // let out = {
-              //   blockstore,
-              //   root,
-              // }
-              return blockstore;
-            };
-  
-            // // Perform the blockstore update asynchronously
-            updateBlockstore().then(() => {
-              console.log('current root shard cid ' + rootShard)
-            });
-            // .then((out) => {
-            //   console.log(`setting root ${JSON.stringify(out)}`)
-              // Logging the updated blockstore state
-              // console.log('Updated blockstore: ', updatedBlockstore);
-              // setRootShard(root);
-              // setMemoryBlockstore(updatedBlockstore);
-            // });
-  
-            // Return the current blockstore as is for now
-            return blockstore;
-          });
-        }
+        setRootShard(root);
+        setMemoryBlockstore(blockstore);
+      } catch (e) {
+        console.error(e);
       }
-    }, INTERVAL);
-  
-    // Clear the interval when the component is unmounted
-    return () => clearInterval(interval);
+    };
+
+    // const handleQuery = async (uri) => {
+    //   if (!memoryBlockstore || !rootShard) return;
+    //   console.log('Querying mesh with memory blockstore:', memoryBlockstore);
+    //   console.log('Querying mesh with root:', rootShard.toString());
+    //   const out = await get(memoryBlockstore, rootShard, uri);
+    //   // setQueryResult(`0x${toHexString(out.signature)}`);
+    // };
+
+    beaconListener.on('pulse', handlePulse);
+    // beaconListener.on('query', handleQuery);
+
+    return () => {
+      // beaconListener.off('query', handleQuery);
+      beaconListener.off('pulse', handlePulse);
+    };
+  }, [memoryBlockstore, rootShard]);
+
+  // randomly choose a beacon and emit a pulse
+  const randBeacon = (newBeacons) => {
+    let b = randomNumberInRange(0, newBeacons.length - 1);
+    let beacon = newBeacons[b];
+    let pulse = beacon.nextPulse();
+    let uri = buildUri(beacon.chainId, pulse.index);
+    beaconListener.emit('pulse', { uri, pulse });
   };
-  
-  
 
-  // const runBeacons = () => {
-  //   const interval = setInterval(async () => {
-  //     let b = randomNumberInRange(0, 2);
-  //     if (beacons) {
-  //       let beacon = beacons[b];
-  //       if (beacon) {
-  //         let pulse = beacon.nextPulse();
-  //         let uri = '/beacon/2.0/chain/' + beacon.chainId + '/pulse/' + pulse.index;
-  //         // console.log(JSON.stringify(beacon));
-  //         let blockstore = memoryBlockstore;
-  //         console.log('blockstore: ' + JSON.stringify(blockstore))
-  //         // Add a key and value to the bucket
-  //         const { root, additions, removals } = await put(blockstore, rootShard, uri, pulse);
-  //         setRootShard(root);
-  //         console.log('additions ' +additions)
-  //         console.log(`new root: ${root}`);
-          
-  //         // Process the diff
-  //         for (const block of additions) {
-  //           await blockstore.put(block.cid, block.bytes);
-  //         }
+  const updateBlockstore = async (blockstore, rootShardCID, uri, pulse) => {
+    try {
+      const { root, additions, removals } = await put(blockstore, rootShardCID, uri, pulse);
+      for (const block of additions) {
+        await blockstore.put(block.cid, block.bytes);
+      }
+      for (const block of removals) {
+        await blockstore.delete(block.cid);
+      }
+      const out = await get(blockstore, root, uri);
+      // console.log('recovered ' + JSON.stringify(out));
+      return { root, blockstore };
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
-  //         // for (const block of removals) {
-  //         //   await blockstore.delete(block.cid);
-  //         // }
+  // const queryMesh = () => {
+  //   let uri = buildUri(searchChainId, searchPulseIndex);
+  //   beaconListener.emit('query', uri);
+  // };
 
-  //         setMemoryBlockstore(blockstore);
-  //       }
-  //     }
-  //   }, INTERVAL);
-  //   return () => clearInterval(interval);
-  // }
-
-  const queryMesh = async () => {
-    let uri = '/beacon/2.0/chain/' + searchChainId + '/pulse/' + searchPulseIndex;
-    console.log('searching for key ' + uri);
-    console.log('blockstore ' + JSON.stringify(memoryBlockstore));
-    console.log('root ' + rootShard)
-    const {out} = await get(memoryBlockstore, rootShard, uri);
-    console.log(out);
-  }
-
+    const BeaconContainer = () => {
+    const { beacons, blocks, root } = useContext(EntropyMeshContext);
+    return (
+      <div className="beacon-container">
+        <h2 className="beacons-title">Beacons</h2>
+        <div className="beacon-grid">
+          {beacons.map((b) => (
+            <div key={b.chainId} className="beacon-item">
+              <span>Chain Id: {b.chainId}</span>
+              <span>Latest Pulse Index: {b.prevPulseIndex}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   function buildBeacon(seed) {
     let t = new TextEncoder();
     let keypair = generate_keys(t.encode(seed));
     let beacon = new BeaconSim(seed, keypair, 0);
     return beacon;
-    // setBeacons(beacons => [...beacons, beacon]);
   }
 
   return (
@@ -240,29 +174,30 @@ function App() {
         Entropy Mesh Simulator
       </div>
       <div className="body">
-          {/* <button onClick={runBeacon}>Start</button> */}
-          <div className='beacon-search'>
-            <label htmlFor='chainId'>Chain Id</label>
-            <input type='text' name='chainId' value={searchChainId} onChange={(e) => setSearchChainId(e.target.value)} />
-            <label htmlFor='pulseIndex'>Pulse Index</label>
-            <input type='number' name='pulseIndex' value={searchPulseIndex} onChange={(e) => setSearchPulseIndex(e.target.value)} />
-            <span>uri: /beacon/2.0/chain/{searchChainId ? searchChainId : '_'}/pulse/{searchPulseIndex}</span>
-            <button onClick={queryMesh}>Search</button>
-          </div>
-          <div className='beacons-container'>
-            { beacons.map(b => {
-              return <div key={b.chainId} className='beacon-container'>
-                <span>Chain Id: { b.chainId }</span>
-                <span>Latest Pulse Index: { b.prevPulseIndex }</span>
-              </div>
-            }) }
-          </div>
-          <div>
-            { run === true ? 
-              <button>stop</button>
-            : <button onClick={runBeacons}>start</button>
-            }
-          </div>
+        <div>
+          <span>Latest root: {JSON.stringify(rootShard)}</span>
+        </div>
+        <div className='beacons-container'>
+          <EntropyMeshContext.Provider value={{ beacons, memoryBlockstore, rootShard }}>
+            <Tabs>
+              <TabList>
+                <Tab>Lock</Tab>
+                <Tab>Query</Tab>
+                <Tab>Beacons</Tab>
+              </TabList>
+
+              <TabPanel>
+                <TLock />
+              </TabPanel>
+              <TabPanel>
+                <MeshQueryContainer />
+              </TabPanel>
+              <TabPanel>
+                <BeaconContainer />
+              </TabPanel>
+            </Tabs>
+          </EntropyMeshContext.Provider>
+        </div>
       </div>
     </div>
   );
