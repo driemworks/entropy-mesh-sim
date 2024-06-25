@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "crypto": "npm:crypto-browserify",
+    "stream": "npm:crypto-browserify",
     "@ideallabs/etf-sdk": "^0.1.8-dev",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
     "@web3-storage/pail": "^0.6.0",
+    "crypto-browserify": "^3.12.0",
+    "js-crypto-hkdf": "^1.0.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-scripts": "5.0.1",
+    "react-tabs": "^6.0.2",
     "web-vitals": "^2.1.4"
+  },
+  "devDependencies": {},
+  "browser": {
+    "crypto": false
   },
   "scripts": {
     "start": "react-scripts start",
