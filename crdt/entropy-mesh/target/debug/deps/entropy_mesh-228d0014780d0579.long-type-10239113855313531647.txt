@@ -1,0 +1,1 @@
+MerkleReg<Pulse<TinyBLS<ark_ec::models::bls12::Bls12<ark_bls12_377::curves::Config>, ark_bls12_377::curves::Config>>>

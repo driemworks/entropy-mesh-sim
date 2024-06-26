@@ -374,11 +374,15 @@ checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
 name = "entropy-mesh"
 version = "0.1.0"
 dependencies = [
+ "ark-serialize",
  "ark-std",
  "crdts",
  "etf-crypto-primitives",
  "rand_chacha",
+ "serde",
+ "serde_json",
  "sha2",
+ "tiny-keccak",
  "w3f-bls",
 ]
 
